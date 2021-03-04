@@ -5,12 +5,23 @@
 
 # from distutils.core import setup, Extension # Build system.
 from setuptools import setup, Extension, find_packages
+from setuptools.command.build_clib import build_clib as old_clib
 import os, fnmatch, shutil                  # Directory traversal, file list building.
 import platform                             # OS detection.
 import sys                                  # cpu arch detection.
 import numpy                                # To get include dir on macOS.
 
 is_64bits = sys.maxsize > 2**32
+
+# this is a (hopefully temporary) hack to make the tinyexr library visible
+# for building screen. libtinyexr.* otherwise gets buried in a temporary
+# directory. As far as I can tell, there's no way to set build_clib
+# except via the extra command line argument 'build-clib', so we fix
+# it to the top level of the build for now
+class build_clib(old_clib):
+    def initialize_options(self):
+        super().initialize_options()
+        self.build_clib = '.'
 
 # unified version number, read from simple text file
 def get_version():
@@ -89,6 +100,25 @@ if platform.system() == 'Linux':
     psychhid_libdirs = []
     psychhid_libs = ['dl', 'usb-1.0', 'X11', 'Xi', 'util']
     psychhid_extra_objects = []
+
+    # Extra OS specific libs for Screen:
+    screen_includes = ['/usr/X11R6/include', '/usr/include/gstreamer-1.0',
+                       '/usr/lib/x86_64-linux-gnu/gstreamer-1.0/include',
+                       '/usr/include/glib-2.0', '/usr/lib/glib-2.0/include',
+                       '/usr/lib/i386-linux-gnu/glib-2.0/include',
+                       '/usr/lib/x86_64-linux-gnu/glib-2.0/include',
+                       '/usr/include/libxml2', 
+                       'PsychSourceGL/Cohorts/libnvstusb-code-32/include']
+    screen_libdirs = ['/usr/X11R6/lib']
+    screen_libs = ['GL', 'GLU', 'X11', 'Xext', 'X11-xcb', 'xcb', 'xcb-dri3',
+                   'gstreamer-1.0', 'gstbase-1.0', 'gstapp-1.0', 'gstvideo-1.0',
+                   'gstpbutils-1.0', 'gobject-2.0', 'gmodule-2.0', 'xml2', 
+                   'gthread-2.0', 'glib-2.0', 'Xxf86vm', 'dc1394', 'usb-1.0', 
+                   'pciaccess', 'Xi', 'Xrandr', 'Xfixes']
+    screen_macro_names = ['PTB_USE_GSTREAMER', 'PTBVIDEOCAPTURE_LIBDC', 
+                          'PTB_USE_NVSTUSB', 'GLEW_STATIC', '_GNU_SOURCE']
+    screen_macros = [(n, None) for n in screen_macro_names]
+    screen_extra_objects = ['libtinyexr.a']
 
     # Extra files needed, e.g., libraries:
     extra_files = {}
@@ -249,6 +279,21 @@ IOPort = Extension(name,
                   )
 ext_modules.append(IOPort)
 
+# Screen module:
+tinyexr = ('tinyexr',
+           {'sources': ['PsychSourceGL/Source/Common/Screen/tinyexr.cc']})
+name = 'Screen'
+Screen = Extension(name,
+                   extra_compile_args = base_compile_args,
+                   define_macros = get_basemacros(name, osname) + screen_macros,
+                   include_dirs = get_baseincludedirs(name, osname) + screen_includes,
+                   sources = get_basesources(name, osname),
+                   library_dirs = screen_libdirs,
+                   libraries = base_libs + screen_libs,
+                   extra_objects = screen_extra_objects
+                  )
+ext_modules.append(Screen)
+
 setup (name = 'psychtoolbox',
        version = version,
        description = 'Pieces of Psychtoolbox-3 ported to CPython.',
@@ -264,6 +309,8 @@ setup (name = 'psychtoolbox',
        ext_modules = ext_modules,
        include_package_data=True,  # Include files listed in MANIFEST.in
        install_requires = ['numpy>=1.7'],
+       libraries = [tinyexr],
+       cmdclass = {'build_clib': build_clib}
       )
 
 if platform.system() == 'Windows':
