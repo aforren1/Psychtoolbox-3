@@ -282,7 +282,7 @@ setup (name = 'psychtoolbox',
        ext_package = 'psychtoolbox',
        ext_modules = ext_modules,
        include_package_data=True,  # Include files listed in MANIFEST.in
-       install_requires = ['numpy>=1.7'],
+       install_requires = ['numpy>=1.16.5'], # https://github.com/numpy/numpy/pull/14056
        cmdclass={"bdist_wheel": bdist},
       )
 

@@ -50,19 +50,10 @@
 
 #if PSYCH_LANGUAGE == PSYCH_PYTHON
 
-// Import NumPy array handling functions: Require at least NumPy v 1.7, released
-// in February 2013:
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+// Import NumPy array handling functions: Require at least NumPy v 1.16, released
+// in January 2019 (but for limited API support, requires at least 1.16.5):
+#define NPY_NO_DEPRECATED_API NPY_1_16_API_VERSION
 #include <numpy/arrayobject.h>
-// Define after include, to avoid compiler warning and pass runtime loader compat check:
-#undef NPY_FEATURE_VERSION
-#define NPY_FEATURE_VERSION NPY_1_7_API_VERSION
-
-// Can not use NPY_TITLE_KEY macro if compat limited api is selected.
-// However, i have no clue what we'd use it for, so there...
-#ifdef Py_LIMITED_API
-#undef NPY_TITLE_KEY
-#endif
 
 #if defined(Py_LIMITED_API) && defined(__GNUC__) && (__GNUC__ < 10)
 /* Workaround from https://github.com/lpsinger/ligo.skymap/blob/v0.5.3/src/core.c#L21
