@@ -73,6 +73,7 @@
     #define printf PySys_WriteStdout
     #undef fprintf
     #define fprintf(fdignore, ...) PySys_WriteStderr(__VA_ARGS__)
+    #define mexPrintf printf
 #endif
 
 //platform dependent macro defines

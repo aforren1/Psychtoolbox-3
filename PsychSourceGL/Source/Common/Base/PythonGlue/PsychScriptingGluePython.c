@@ -64,6 +64,26 @@
 #undef NPY_TITLE_KEY
 #endif
 
+#if defined(Py_LIMITED_API) && defined(__GNUC__) && (__GNUC__ < 10)
+/* Workaround from https://github.com/lpsinger/ligo.skymap/blob/v0.5.3/src/core.c#L21
+ *
+ * FIXME:
+ * The Numpy C-API defines PyArrayDescr_Type as:
+ *
+ *   #define PyArrayDescr_Type (*(PyTypeObject *)PyArray_API[3])
+ *
+ * and then in some places we need to take its address, &PyArrayDescr_Type.
+ * This is fine in GCC 10 and Clang, but earlier versions of GCC complain:
+ *
+ *   error: dereferencing pointer to incomplete type 'PyTypeObject'
+ *   {aka 'struct _typeobject'}
+ *
+ * As a workaround, provide a faux forward declaration for PyTypeObject.
+ * See https://github.com/numpy/numpy/issues/16970.
+ */
+struct _typeobject {};
+#endif
+
 // Define this to 1 if you want lots of debug-output for the Python-Scripting glue.
 #define DEBUG_PTBPYTHONGLUE 0
 
@@ -127,28 +147,7 @@ static PyMethodDef GlobalPythonMethodsTable[] = {
     {NULL, NULL, 0, NULL}
 };
 
-// Python 2 init code -- Python 2.6+ is required for PTB modules:
-#if PY_MAJOR_VERSION < 3
-#define _PPYINIT(n) PyMODINIT_FUNC init ## n(void)
-
-// This is the entry point - module init function, called at module import:
-// PTBMODULENAME is -DPTBMODULENAME myname defined by the build script to the
-// name of the module, e.g., GetSecs.
-PPYINIT(PTBMODULENAME)
-{
-    modulefilename[0] = 0;
-
-    // Add a help string with module synopsis to 1st function - our main dispatch function:
-    GlobalPythonMethodsTable[0].ml_doc = PsychBuildSynopsisString(PPYNAME(PTBMODULENAME));
-
-    // Initialize module:
-    module = Py_InitModule(PPYNAME(PTBMODULENAME), GlobalPythonMethodsTable);
-}
-// End of Python 2.x specific init code
-#endif
-
 // Python 3 init code:
-#if PY_MAJOR_VERSION >= 3
 #define _PPYINIT(n) PyMODINIT_FUNC PyInit_ ## n(void)
 
 // Defined in PsychScriptingGluePython.c
@@ -200,9 +199,6 @@ PPYINIT(PTBMODULENAME)
     return(module);
 }
 
-// End of Python 3.x specific init code
-#endif
-
 // END OF MODULE INITIALIZATION FOR PYTHON:
 
 // Return filename of the module definition file - the shared library:
@@ -210,17 +206,10 @@ const char* PsychGetPyModuleFilename(void)
 {
     // Get full filesystem path/name of the module definition file, ie. the library:
     if (module && !modulefilename[0]) {
-        #if PY_MAJOR_VERSION >= 3
-            PyObject *fname = PyModule_GetFilenameObject(module);
-        #else
-            PyObject *fname = NULL;
-        #endif
-
+        PyObject *fname = PyModule_GetFilenameObject(module);
         if (fname)
             mxGetString(fname, modulefilename, sizeof(modulefilename) - 1);
-        else
-            sprintf(modulefilename, "%s", PyModule_GetFilename(module));
-        Py_XDECREF(fname);
+            Py_DECREF(fname);
     }
 
     return(&modulefilename[0]);
@@ -244,16 +233,6 @@ void mexErrMsgTxt(const char* s) {
 
     // Use the jump-buffer to unwind the stack...
     longjmp(jmpbuffer[recLevel], 1);
-}
-
-// Interface to printf... TODO Used anywhere?
-void mexPrintf(const char* fmt, ...)
-{
-    va_list args;
-    va_start (args, fmt);
-    vfprintf(stderr, fmt, args);
-    vfprintf(stdout, fmt, args);
-    va_end(args);
 }
 
 void* mxMalloc(int size)
@@ -462,16 +441,13 @@ PyObject* mxCreateString(const char* instring)
     #endif
 
     if (!ret) {
-        #if PY_MAJOR_VERSION < 3
-        // Fallback to standard C string decoding:
-        ret = PyString_FromString(instring);
-        #else
         // Try decoding assuming current system locale setting:
         ret = PyUnicode_DecodeLocale(instring, "surrogateescape");
         PyErr_Clear();
 
         // Retry with strict error handler, because of backwards incompatible
         // change in Python 3.6 -> 3.7 (sigh):
+        #ifndef Py_LIMITED_API
         if (!ret) {
             ret = PyUnicode_DecodeLocale(instring, "strict");
             PyErr_Clear();
@@ -585,18 +561,13 @@ int mxGetString(PyObject* arrayPtr, char* outstring, int outstringsize)
     if (!mxIsChar(arrayPtr))
         PsychErrorExitMsg(PsychError_internal, "FATAL Error: Tried to convert a non-string into a string!");
 
-    #if PY_MAJOR_VERSION < 3
-        // Python 2: Gives a new reference to a unicode object. Converts bytes -> unicode as needed:
-        arrayPtr = PyObject_Unicode(arrayPtr);
-    #else
-        // Python 3: No PyObject_Unicode(), distinguish unicode input vs. bytes 8-bit legacy string input:
-        if (PyUnicode_Check(arrayPtr))
-            // Provide it as Latin1 8-bit "bytes" string from unicode, giving a new reference:
-            arrayPtr = PyUnicode_AsLatin1String(arrayPtr);
-        else
-            // Is already a 8-bit "bytes" string. Increment refcount, to counteract decref below:
-            Py_INCREF(arrayPtr);
-    #endif
+    // Python 3: No PyObject_Unicode(), distinguish unicode input vs. bytes 8-bit legacy string input:
+    if (PyUnicode_Check(arrayPtr))
+        // Provide it as Latin1 8-bit "bytes" string from unicode, giving a new reference:
+        arrayPtr = PyUnicode_AsLatin1String(arrayPtr);
+    else
+        // Is already a 8-bit "bytes" string. Increment refcount, to counteract decref below:
+        Py_INCREF(arrayPtr);
 
     // Got a 8-bit "bytes" string?
     if (arrayPtr) {
@@ -810,19 +781,11 @@ static psych_bool firstTime = TRUE;
 PsychError PsychExitPythonGlue(void);
 void ScreenCloseAllWindows(void);
 
-// Is this awful, or what? Hackery needed to handle NumPy for Python 3 vs 2:
-#if PY_MAJOR_VERSION >= 3
 void* init_numpy(void)
 {
     import_array();
     return(NULL);
 }
-#else
-void init_numpy(void)
-{
-    import_array();
-}
-#endif
 
 void PsychExitRecursion(void)
 {
@@ -2671,7 +2634,7 @@ psych_bool PsychAllocInCharArg(int position, PsychArgRequirementType isRequired,
     if (acceptArg) {
         ppyPtr = (PyObject*) PsychGetInArgPyPtr(position);
         if (PyUnicode_Check(ppyPtr))
-            strLen = (psych_uint64) PyUnicode_GetSize(ppyPtr) + 1;
+            strLen = (psych_uint64) PyUnicode_GetLength(ppyPtr) + 1;
         else
             strLen = (psych_uint64) PyBytes_Size(ppyPtr) + 1;
 
@@ -2870,51 +2833,50 @@ double PsychGetNanValue(void)
  * getConfigDir = FALSE => Return PsychtoolboxRoot().
  *
  * This function may fail to retrieve the path, in which case it returns an empty null-terminated string, i.e., strlen() == 0.
- * On successfull recovery of the path, returns a const char* to a readonly string which encodes the path.
+ * On successful recovery of the path, returns a const char* to a readonly string which encodes the path.
  *
  */
 const char* PsychRuntimeGetPsychtoolboxRoot(psych_bool getConfigDir)
 {
+    static psych_bool   firstTime = TRUE;
     static char         psychtoolboxRootPath[FILENAME_MAX+1];
     static char         psychtoolboxConfigPath[FILENAME_MAX+1];
-/*
-    static psych_bool   firstTime = TRUE;
-    char*               myPathvarChar = NULL;
-    PyObject            *plhs[1]; // Capture the runtime result of PsychtoolboxRoot/ConfigDir
 
     if (firstTime) {
-        // Reset firstTime flag:
         firstTime = FALSE;
 
         // Init to null-terminated empty strings, so it is well-defined in case of error:
         psychtoolboxRootPath[0] = 0;
         psychtoolboxConfigPath[0] = 0;
 
-        // Call into runtime to get the path to the root folder: This will return 0 on success.
-        // A non-zero return value probably means that the script wasn't in the path.
-        if (0 == Psych_mexCallMATLAB(1, plhs, 0, NULL, "PsychtoolboxRoot")) {
-            myPathvarChar = mxArrayToString(plhs[0]);
-            if (myPathvarChar) {
-                strncpy(psychtoolboxRootPath, myPathvarChar, FILENAME_MAX);
-                mxFree(myPathvarChar);
+        // Get the __path__ to the module
+        PyObject *ptb = NULL;
+        PyObject *dict = NULL; // borrowed
+        PyObject *path = NULL; // borrowed
+        PyObject *realPath = NULL; // borrowed
+        PyObject *encodedString = NULL;
+        char *myPathvarChar = NULL; // not ours to deallocate
+        if ((ptb = PyImport_ImportModule("psychtoolbox"))) {
+            if ((dict = PyModule_GetDict(ptb))) {
+                if ((path = PyDict_GetItemString(dict, "__path__"))) {
+                    if ((realPath = PyList_GetItem(path, 0)) && PyUnicode_Check(realPath)) {
+                        if ((encodedString = PyUnicode_AsUTF8String(realPath))) {
+                            if ((myPathvarChar = PyBytes_AsString(encodedString))) {
+                                strncpy(psychtoolboxRootPath, myPathvarChar, FILENAME_MAX);
+                                strncat(psychtoolboxRootPath, "/", FILENAME_MAX);
+                            }
+                        }
+                    }
+                }
             }
         }
-        mxDestroyArray(plhs[0]);
+        Py_XDECREF(encodedString);
+        Py_XDECREF(ptb);
+        // TODO: get path to config dir? We could *maybe* point to somewhere inside the package,
+        // but what if that's not user-writable?
 
-        // At this point we did our best and psychtoolboxRootPath is valid: Either a path string,
-        // or an empty string signalling failure to get the path.
-
-        // Same game again for PsychtoolboxConfigDir:
-        if (0 == Psych_mexCallMATLAB(1, plhs, 0, NULL, "PsychtoolboxConfigDir")) {
-            myPathvarChar = mxArrayToString(plhs[0]);
-            if (myPathvarChar) {
-                strncpy(psychtoolboxConfigPath, myPathvarChar, FILENAME_MAX);
-                mxFree(myPathvarChar);
-            }
-        }
-        mxDestroyArray(plhs[0]);
     }
-*/
+
     // Return whatever we've got:
     return((getConfigDir) ? &psychtoolboxConfigPath[0] : &psychtoolboxRootPath[0]);
 }
@@ -3073,24 +3035,18 @@ psych_bool PsychRuntimeGetVariablePtr(const char* workspace, const char* variabl
  * Simple function evaluation by the Python scripting environment.
  * This asks the runtime environment to execute/evaluate the given string 'cmdstring',
  * passing no return arguments back, except an error code.
- *
- * CAUTION: If Py_LIMITED_API is used for being able to build one set of modules
- *          for all Python 3.2+ versions, then this function will not work / be
- *          unavailable!
  */
 int PsychRuntimeEvaluateString(const char* cmdstring)
 {
-#ifndef Py_LIMITED_API
-    PyObject* res;
-    res = PyRun_String(cmdstring, Py_file_input, PyEval_GetGlobals(), PyEval_GetLocals());
-    if (res) {
-        // Success! We don't have a use for the res'ults object yet, so just unref it:
-        Py_XDECREF(res);
-        return(0);
+    PyObject* code = Py_CompileString(cmdstring, "PTB", Py_file_input);
+    if (code) {
+        PyObject* res = PyEval_EvalCode(code, PyEval_GetGlobals(), PyEval_GetLocals());
+        Py_DECREF(code);
+        if (res) {
+            Py_DECREF(res);
+            return(0);
+        }
     }
-#else
-	printf("PTB-WARNING: Module tried to call PsychRuntimeEvaluateString(%s),\nwhich is *unsupported* in Py_LIMITED_API mode!!!\n", cmdstring);
-#endif
     // Failed:
     return(-1);
 }

@@ -10,6 +10,8 @@ import platform                             # OS detection.
 import sys                                  # cpu arch detection.
 import numpy                                # To get include dir on macOS.
 
+from wheel.bdist_wheel import bdist_wheel
+
 is_64bits = sys.maxsize > 2**32
 
 # unified version number, read from simple text file
@@ -63,6 +65,18 @@ base_macros = [('PTBOCTAVE3MEX', None), ('PSYCH_LANGUAGE', 'PSYCH_PYTHON')]
 # Python >= 3.2. The downside is loss of important functionality [PsychRuntimeEvaluateString()) does not work!].
 # Also, we have build failure on at least Ubuntu 18.04 LTS with Python 3.6, so it is a no-go on Linux for now!
 #base_macros = [('PTBOCTAVE3MEX', None), ('PSYCH_LANGUAGE', 'PSYCH_PYTHON'), ('Py_LIMITED_API', None)]
+
+# if building on py >= 3.7, build as a limited API wheel.
+base_macros.append(('Py_LIMITED_API', '0x03070000'))
+py_limited_api = True
+# https://github.com/joerick/python-abi3-package-sample/blob/7f05b22b9e0cfb4e60293bc85252e95278a80720/setup.py#L5
+class bdist(bdist_wheel):
+    def get_tag(self):
+        py, abi, plat = super().get_tag()
+        if py.startswith('cp'):
+            return 'cp37', 'abi3', plat
+        return py, abi, plat
+
 
 # Common infrastructure and the scripting glue module for interfacing with the Python runtime:
 basefiles_common = get_sourcefiles('./PsychSourceGL/Source/Common/Base') + ['PsychSourceGL/Source/Common/Base/PythonGlue/PsychScriptingGluePython.c']
@@ -195,6 +209,7 @@ GetSecs = Extension(name,
                     include_dirs = get_baseincludedirs(name, osname),
                     sources = get_basesources(name, osname),
                     libraries = base_libs,
+                    py_limited_api = py_limited_api,
                    )
 ext_modules.append(GetSecs)
 
@@ -205,7 +220,8 @@ WaitSecs = Extension(name,
                      define_macros = get_basemacros(name, osname),
                      include_dirs = get_baseincludedirs(name, osname),
                      sources = get_basesources(name, osname),
-                     libraries = base_libs
+                     libraries = base_libs,
+                     py_limited_api = py_limited_api,
                      )
 ext_modules.append(WaitSecs)
 
@@ -221,7 +237,8 @@ if is_64bits or platform.system() == 'Linux':
                                library_dirs = audio_libdirs,
                                libraries = base_libs + audio_libs,
                                extra_link_args = audio_extralinkargs,
-                               extra_objects = audio_objects
+                               extra_objects = audio_objects,
+                               py_limited_api = py_limited_api,
                                )
     ext_modules.append(PsychPortAudio)
 
@@ -234,7 +251,8 @@ PsychHID = Extension(name,
                      sources = get_basesources(name, osname),
                      library_dirs = psychhid_libdirs,
                      libraries = base_libs + psychhid_libs,
-                     extra_objects = psychhid_extra_objects
+                     extra_objects = psychhid_extra_objects,
+                     py_limited_api = py_limited_api,
                     )
 ext_modules.append(PsychHID)
 
@@ -245,7 +263,8 @@ IOPort = Extension(name,
                    define_macros = get_basemacros(name, osname),
                    include_dirs = get_baseincludedirs(name, osname),
                    sources = get_basesources(name, osname),
-                   libraries = base_libs
+                   libraries = base_libs,
+                   py_limited_api = py_limited_api,
                   )
 ext_modules.append(IOPort)
 
@@ -264,6 +283,7 @@ setup (name = 'psychtoolbox',
        ext_modules = ext_modules,
        include_package_data=True,  # Include files listed in MANIFEST.in
        install_requires = ['numpy>=1.7'],
+       cmdclass={"bdist_wheel": bdist},
       )
 
 if platform.system() == 'Windows':
