@@ -61,21 +61,21 @@ def get_basesources(name, osname):
 # Treating some special cases like Octave seems to be the right thing to do,
 # PSYCH_LANGUAGE setting is self-explanatory:
 base_macros = [('PTBOCTAVE3MEX', None), ('PSYCH_LANGUAGE', 'PSYCH_PYTHON')]
-# Disabled: This would enable Py_LIMITED_API, to allow to build one set of modules for all versions of
-# Python >= 3.2. The downside is loss of important functionality [PsychRuntimeEvaluateString()) does not work!].
-# Also, we have build failure on at least Ubuntu 18.04 LTS with Python 3.6, so it is a no-go on Linux for now!
-#base_macros = [('PTBOCTAVE3MEX', None), ('PSYCH_LANGUAGE', 'PSYCH_PYTHON'), ('Py_LIMITED_API', None)]
 
 # if building on py >= 3.7, build as a limited API wheel.
-base_macros.append(('Py_LIMITED_API', '0x03070000'))
-py_limited_api = True
-# https://github.com/joerick/python-abi3-package-sample/blob/7f05b22b9e0cfb4e60293bc85252e95278a80720/setup.py#L5
-class bdist(bdist_wheel):
-    def get_tag(self):
-        py, abi, plat = super().get_tag()
-        if py.startswith('cp'):
-            return 'cp37', 'abi3', plat
-        return py, abi, plat
+if sys.version_info >= (3, 7):
+    base_macros.append(('Py_LIMITED_API', '0x03070000'))
+    py_limited_api = True
+    # https://github.com/joerick/python-abi3-package-sample/blob/7f05b22b9e0cfb4e60293bc85252e95278a80720/setup.py#L5
+    class bdist(bdist_wheel):
+        def get_tag(self):
+            py, abi, plat = super().get_tag()
+            if py.startswith('cp'):
+                return 'cp37', 'abi3', plat
+            return py, abi, plat
+else:
+    py_limited_api = False
+    bdist = bdist_wheel
 
 
 # Common infrastructure and the scripting glue module for interfacing with the Python runtime:
