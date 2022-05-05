@@ -2847,19 +2847,16 @@ const char* PsychRuntimeGetPsychtoolboxRoot(psych_bool getConfigDir)
         PyObject *realPath = NULL; // borrowed
         PyObject *encodedString = NULL;
         char *myPathvarChar = NULL; // not ours to deallocate
-        if ((ptb = PyImport_ImportModule("psychtoolbox"))) {
-            if ((dict = PyModule_GetDict(ptb))) {
-                if ((path = PyDict_GetItemString(dict, "__path__"))) {
-                    if ((realPath = PyList_GetItem(path, 0)) && PyUnicode_Check(realPath)) {
-                        if ((encodedString = PyUnicode_AsUTF8String(realPath))) {
-                            if ((myPathvarChar = PyBytes_AsString(encodedString))) {
-                                strncpy(psychtoolboxRootPath, myPathvarChar, FILENAME_MAX);
-                                strncat(psychtoolboxRootPath, "/", FILENAME_MAX);
-                            }
-                        }
-                    }
-                }
-            }
+
+        if ((ptb = PyImport_ImportModule("psychtoolbox")) &&
+            (dict = PyModule_GetDict(ptb)) &&
+            (path = PyDict_GetItemString(dict, "__path__")) &&
+            (realPath = PyList_GetItem(path, 0)) && PyUnicode_Check(realPath) &&
+            (encodedString = PyUnicode_AsUTF8String(realPath)) &&
+            (myPathvarChar = PyBytes_AsString(encodedString))) {
+
+            strncpy(psychtoolboxRootPath, myPathvarChar, FILENAME_MAX);
+            strncat(psychtoolboxRootPath, "/", FILENAME_MAX);
         }
         Py_XDECREF(encodedString);
         Py_XDECREF(ptb);
