@@ -28,7 +28,7 @@ function gitInfo = GetGITInfo(directory)
 %               The change did not break anything obvious on my machine.
 % 12/8/18  dhb  Same edit, line 99
 
-tempFile = 'GetGITInfo_gitTemp.log';
+tempFile = tempname();
 
 if nargin ~= 1
     error('Usage: gitInfo = GetGITInfo(directory)');
