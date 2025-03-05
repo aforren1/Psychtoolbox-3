@@ -626,25 +626,21 @@ void PsychInitializeImagingPipeline(PsychWindowRecordType *windowRecord, int ima
             break;
 
             case GL_RGBA_FLOAT16_APPLE:
-                printf("PTB-INFO: Will use 16 bits per color component floating point framebuffer for stimulus drawing. ");
+                printf("PTB-INFO: Will use 16 bits per color component floating point framebuffer for stimulus drawing.\n");
                 if (windowRecord->gfxcaps & kPsychGfxCapFPBlend16) {
-                    printf("Alpha blending should work correctly.\n");
                     if (imagingmode & kPsychUse32BPCFloatAsap) {
                         printf("PTB-INFO: Can't use 32 bit precision for drawing because hardware doesn't support alpha-blending in 32 bpc.\n");
                     }
                 }
                 else {
-                    printf("Alpha blending may not work on your system with this setup, but only for 8 bits per color component mode.\n");
+                    printf("PTB-WARNING: Alpha blending may not work on your system with this setup, but only for 8 bits per color component mode.\n");
                 }
             break;
 
             case GL_RGBA_FLOAT32_APPLE:
-                printf("PTB-INFO: Will use 32 bits per color component floating point framebuffer for stimulus drawing. ");
-                if (windowRecord->gfxcaps & kPsychGfxCapFPBlend32) {
-                    printf("Alpha blending should work correctly.\n");
-                }
-                else {
-                    printf("Alpha blending may not work on your system with this setup, but only for lower precision modes.\n");
+                printf("PTB-INFO: Will use 32 bits per color component floating point framebuffer for stimulus drawing.\n");
+                if (!(windowRecord->gfxcaps & kPsychGfxCapFPBlend32)) {
+                    printf("PTB-WARNING: Alpha blending may not work on your system with this setup, but only for lower precision modes.\n");
                 }
             break;
         }
@@ -882,23 +878,23 @@ void PsychInitializeImagingPipeline(PsychWindowRecordType *windowRecord, int ima
     if (PsychPrefStateGet_Verbosity()>2) {
         switch (fboInternalFormat) {
             case GL_RGBA8:
-                printf("PTB-INFO: Will use 8 bits per color component framebuffer for stimulus post-processing (if any).\n");
+                printf("PTB-INFO: Will use 8 bits per color component framebuffer for any stimulus post-processing.\n");
             break;
 
             case GL_RGBA16:
-                printf("PTB-INFO: Will use 16 bits per color component unsigned integer framebuffer for stimulus post-processing (if any).\n");
+                printf("PTB-INFO: Will use 16 bits per color component unsigned integer framebuffer for any stimulus post-processing.\n");
             break;
 
             case GL_RGBA16_SNORM:
-                printf("PTB-INFO: Will use 15 bits per color component signed integer framebuffer for stimulus post-processing (if any).\n");
+                printf("PTB-INFO: Will use 15 bits per color component signed integer framebuffer for any stimulus post-processing.\n");
             break;
 
             case GL_RGBA_FLOAT16_APPLE:
-                printf("PTB-INFO: Will use 16 bits per color component floating point framebuffer for stimulus post-processing (if any).\n");
+                printf("PTB-INFO: Will use 16 bits per color component floating point framebuffer for any stimulus post-processing.\n");
             break;
 
             case GL_RGBA_FLOAT32_APPLE:
-                printf("PTB-INFO: Will use 32 bits per color component floating point framebuffer for stimulus post-processing (if any).\n");
+                printf("PTB-INFO: Will use 32 bits per color component floating point framebuffer for any stimulus post-processing.\n");
             break;
         }
     }
@@ -1244,7 +1240,7 @@ void PsychInitializeImagingPipeline(PsychWindowRecordType *windowRecord, int ima
 
                 // Are we supposed to use externally injected colorbuffer textures?
                 if (imagingmode & kPsychUseExternalSinkTextures) {
-                    if (PsychPrefStateGet_Verbosity() > 2)
+                    if (PsychPrefStateGet_Verbosity() > 3)
                         printf("PTB-INFO: Using external textures as sinks for redirected output mode.\n");
                 }
 
@@ -1279,7 +1275,7 @@ void PsychInitializeImagingPipeline(PsychWindowRecordType *windowRecord, int ima
 
             // Are we supposed to use externally injected colorbuffer textures?
             if (imagingmode & kPsychUseExternalSinkTextures) {
-                if (PsychPrefStateGet_Verbosity() > 2)
+                if (PsychPrefStateGet_Verbosity() > 3)
                     printf("PTB-INFO: Using external textures as sinks for redirected output mode.\n");
             }
 
@@ -1874,18 +1870,17 @@ psych_bool PsychSetPipelineExportTextureInteropMemory(PsychWindowRecordType *win
     PsychSetGLContext(windowRecord);
     PsychTestForGLErrors();
 
-    // Are all required OpenGL extensions supported?
-    if (!glewIsSupported("GL_EXT_memory_object") || !glewIsSupported("GL_EXT_direct_state_access") ||
+    // Are all required OpenGL extensions supported? Note that somewhere around Mesa 23.3 and later, something is slightly
+    // broken in Mesa's GL_EXT_direct_state_access implementation, in that some required function entry points are missing.
+    // This is not a problem for our use case, but causes glewIsSupported("GL_EXT_direct_state_access") to fail. Work around
+    // this by instead using the more lenient check for GL_EXT_direct_state_access being part of the GL_EXTENSIONS string:
+    if (!glewIsSupported("GL_EXT_memory_object") || !strstr((char*) glGetString(GL_EXTENSIONS), "GL_EXT_direct_state_access") ||
         (!glewIsSupported("GL_EXT_memory_object_fd") && !glewIsSupported("GL_EXT_memory_object_win32"))) {
         if (PsychPrefStateGet_Verbosity() > 0)
             printf("PTB-ERROR: PsychSetPipelineExportTextureInteropMemory: This OpenGL implementation lacks support for some required OpenGL memory object extensions [%i %i %i].\n",
-                   glewIsSupported("GL_EXT_memory_object"), glewIsSupported("GL_EXT_memory_object_fd"), glewIsSupported("GL_EXT_direct_state_access"));
+                   glewIsSupported("GL_EXT_memory_object"), glewIsSupported("GL_EXT_memory_object_fd"), strstr((char*) glGetString(GL_EXTENSIONS), "GL_EXT_direct_state_access") ? 1 : 0);
 
-        // Skip abort and continue on Broadcom VideoCore 6 under zink driver.
-        // Its GL_EXT_direct_state_access lacks some functions, so above check
-        // fails, but the stuff we need here actually works at least as of Mesa 23:
-        if (!strstr((char*) glGetString(GL_RENDERER), "zink (V3D 4.2)"))
-            return(FALSE);
+        return(FALSE);
     }
 
     // Backup current fbo assignments before we mess with them:
@@ -3197,10 +3192,14 @@ void PsychNormalizeTextureOrientation(PsychWindowRecordType *sourceRecord)
     // step to transform the texture into normalized orientation. Non-planar textures would also
     // wreak havoc if not converted into standard pixel-interleaved format:
     if (sourceRecord->textureOrientation != 2 || isplanar) {
-        if (PsychPrefStateGet_Verbosity()>5) printf("PTB-DEBUG: In PsychNormalizeTextureOrientation(): Performing GPU renderswap or format conversion for source gl-texture %i --> ", sourceRecord->textureNumber);
+        if (PsychPrefStateGet_Verbosity()>5) printf("PTB-DEBUG: In PsychNormalizeTextureOrientation(): Performing GPU renderswap or format conversion for source gl-texture %i ...\n", sourceRecord->textureNumber);
 
         // Soft-reset drawing engine in a safe way:
         PsychSetDrawingTarget((PsychWindowRecordType*) 0x1);
+
+        // The soft reset will have potentially switched to the wrong OpenGL context if multiple
+        // onscreen windows are in use, which ends badly. Manually switch to the proper context:
+        PsychSetGLContext(sourceRecord);
 
         // Normalization needed. Create a suitable FBO as rendertarget:
         needzbuffer = FALSE;
@@ -3418,7 +3417,7 @@ void PsychNormalizeTextureOrientation(PsychWindowRecordType *sourceRecord)
         sourceRecord->textureOrientation = 2;
 
         // GPU renderswap finished.
-        if (PsychPrefStateGet_Verbosity()>5) printf("%i.\n", sourceRecord->textureNumber);
+        if (PsychPrefStateGet_Verbosity()>5) printf("PTB-DEBUG: In PsychNormalizeTextureOrientation(): New coltex %i.\n", sourceRecord->textureNumber);
     }
 
     return;
