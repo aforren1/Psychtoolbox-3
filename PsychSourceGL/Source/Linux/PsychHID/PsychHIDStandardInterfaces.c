@@ -50,6 +50,52 @@ static XDevice* GetXDevice(int deviceIndex)
     return(x_dev[deviceIndex]);
 }
 
+// http://www.cse.yorku.ca/~oz/hash.html, djb2
+static unsigned int hash(const char *str)
+{
+    unsigned int hash = 5381;
+    int c;
+    while ((c = *str++)) {
+        hash = ((hash << 5) + hash) + c;
+    }
+    return hash;
+}
+
+static double GetStableDeviceLocation(int deviceid)
+{
+    Atom deviceNode = XInternAtom(dpy, "Device Node", False);
+    Atom actualType;
+    int actualFormat;
+    unsigned long nitems, bytesAfter;
+    unsigned char *data = NULL;
+    double loc = 0.0;
+
+    if (XIGetProperty(dpy, deviceid, deviceNode, 0, 1000, False,
+                      AnyPropertyType, &actualType, &actualFormat,
+                      &nitems, &bytesAfter, &data) == Success && actualFormat == 8)
+    {
+        char *devNode = (char *)data;
+        int fd = open(devNode, O_RDONLY);
+        char *eventName = strrchr(devNode, '/');
+        if (eventName) {
+            char sysfsPath[256];
+            snprintf(sysfsPath, sizeof(sysfsPath), "/sys/class/input%s/device/phys", eventName);
+            FILE *fp = fopen(sysfsPath, "r");
+            if (fp)
+            {
+                char physPath[256];
+                if (fgets(physPath, sizeof(physPath), fp) != NULL)
+                {
+                    loc = (double)hash(physPath);
+                }
+                fclose(fp);
+            }
+        }
+        XFree(data);
+    }
+    return loc;
+}
+
 void PsychHIDInitializeHIDStandardInterfaces(void)
 {
     int rc, i;
@@ -294,7 +340,7 @@ PsychError PsychHIDEnumerateHIDInputDevices(int deviceClass)
         PsychSetStructArrayDoubleElement("index",  deviceIndex,  (double) i, deviceStruct);
         PsychSetStructArrayStringElement("transport",  deviceIndex,  (dev->enabled) ? "enabled" : "disabled", deviceStruct);
         PsychSetStructArrayStringElement("product",  deviceIndex,  dev->name, deviceStruct);
-        PsychSetStructArrayDoubleElement("locationID",  deviceIndex,  (double) dev->attachment, deviceStruct);
+        PsychSetStructArrayDoubleElement("locationID",  deviceIndex,  GetStableDeviceLocation(dev->deviceid), deviceStruct);
         PsychSetStructArrayDoubleElement("interfaceID",  deviceIndex,  (double) dev->deviceid, deviceStruct);
 
         //PsychSetStructArrayDoubleElement("vendorID",  deviceIndex,  (double)currentDevice->vendorID,  deviceStruct);

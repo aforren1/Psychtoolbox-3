@@ -27,5 +27,10 @@
 #include <X11/Xutil.h>
 #include <X11/extensions/XInput.h>
 #include <X11/extensions/XInput2.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include <linux/input.h>
+#include <string.h>
 
 #endif
